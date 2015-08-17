@@ -1,0 +1,21 @@
+package pbcodec;
+
+// This file defines the reqeust and response structures which are used by the
+// pbrpc framework.
+//
+// DO NOT CHANGE THIS.
+//
+// If this has to be changed, please regenrate the C and Go source using the
+// provided script and commit the generated files together with changes here
+
+message PbRpcRequest {
+  required uint64 Id = 1;
+  required string Method = 2; // The method string should be in the format "service.method"
+  optional bytes Params = 3; // Params are protobuf encoded request message for the particualar method
+}
+
+message PbRpcResponse {
+  required uint64 Id = 1;
+  required bytes Result = 2; // Result is the protobuf encoded response message for the particular method
+  optional string Error = 3;
+}
