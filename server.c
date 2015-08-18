@@ -59,6 +59,43 @@ event_cb(struct bufferevent *bev, short events, void *ctx)
         }
 }
 
+enum bufferevent_filter_result filter_pbrpc_requests (struct evbuffer *src,
+                struct evbuffer *dst, ev_ssize_t dst_limit,
+                enum bufferevent_flush_mode mode, void *ctx)
+{
+        uint64_t message_len = 0;
+        size_t buf_len = 0;
+        size_t expected_len = 0;
+        size_t tmp = 0;
+        unsigned char *lenbuf = NULL;
+
+        //Read the message len
+        // evbuffer_pullup doesn't drain the buffer. It just makes sure that
+        // given number of bytes are contiguous, which allows us to easily copy
+        // out stuff.
+        lenbuf = evbuffer_pullup (src, sizeof(message_len));
+        if (!lenbuf)
+                return BEV_ERROR;
+
+        memcpy (&message_len, lenbuf, sizeof(message_len));
+
+        message_len = be64toh (message_len);
+
+        expected_len = sizeof (message_len) + message_len;
+
+        buf_len = evbuffer_get_length (src);
+
+        if (buf_len < expected_len)
+                return BEV_NEED_MORE;
+
+        tmp = evbuffer_remove_buffer
+                (src, dst, (sizeof(message_len) + message_len));
+        if (tmp != expected_len)
+                return BEV_ERROR;
+
+        return BEV_OK;
+}
+
 static void
 accept_conn_cb(struct evconnlistener *listener,
     evutil_socket_t fd, struct sockaddr *address, int socklen,
@@ -69,8 +106,12 @@ accept_conn_cb(struct evconnlistener *listener,
         struct bufferevent *bev = bufferevent_socket_new(
                 base, fd, BEV_OPT_CLOSE_ON_FREE);
 
-        bufferevent_setcb(bev, read_cb, NULL, event_cb, NULL);
-        bufferevent_enable(bev, EV_READ|EV_WRITE);
+        struct bufferevent *filtered_bev = bufferevent_filter_new (
+                        bev, filter_pbrpc_requests, NULL, BEV_OPT_CLOSE_ON_FREE,
+                        NULL, NULL);
+
+        bufferevent_setcb(filtered_bev, read_cb, NULL, event_cb, NULL);
+        bufferevent_enable(filtered_bev, EV_READ|EV_WRITE);
 }
 
 static void
