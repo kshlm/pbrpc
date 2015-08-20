@@ -3,35 +3,166 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <endian.h>
+#include <errno.h>
+#include <arpa/inet.h>
+
+#include <event2/listener.h>
+#include <event2/bufferevent.h>
+#include <event2/buffer.h>
 
 #include "rpc.h"
 #include "pbrpc.pb-c.h"
 #include "calc.pb-c.h"
 
-/* Rpcproto method declarations */
-
-static int
-calculate (ProtobufCBinaryData *req, ProtobufCBinaryData *reply);
-
-/* End of method declarations */
-
-/*
- * FIXME: Need to come up with rpc registration API
- * Should provide vtable during initialisation.
- *
- * */
-
-#define NUM_METHODS 5
-/* Method name to enum mapping*/
-char *method_by_name[NUM_METHODS] =
-{ [CALCULATE] = "calculate"
-};
-
-/* Rpcproto methods table */
-static rpc_handler_func vtable[NUM_METHODS] =
+static enum bufferevent_filter_result
+filter_pbrpc_requests (struct evbuffer *src,
+                struct evbuffer *dst, ev_ssize_t dst_limit,
+                enum bufferevent_flush_mode mode, void *ctx)
 {
-        [CALCULATE] = calculate,
-};
+        uint64_t message_len = 0;
+        size_t buf_len = 0;
+        size_t expected_len = 0;
+        size_t tmp = 0;
+        unsigned char *lenbuf = NULL;
+
+        //Read the message len
+        // evbuffer_pullup doesn't drain the buffer. It just makes sure that
+        // given number of bytes are contiguous, which allows us to easily copy
+        // out stuff.
+        lenbuf = evbuffer_pullup (src, sizeof(message_len));
+        if (!lenbuf)
+                return BEV_ERROR;
+
+        memcpy (&message_len, lenbuf, sizeof(message_len));
+
+        message_len = be64toh (message_len);
+
+        expected_len = sizeof (message_len) + message_len;
+
+        buf_len = evbuffer_get_length (src);
+
+        if (buf_len < expected_len)
+                return BEV_NEED_MORE;
+
+        tmp = evbuffer_remove_buffer
+                (src, dst, (sizeof(message_len) + message_len));
+        if (tmp != expected_len)
+                return BEV_ERROR;
+
+        return BEV_OK;
+}
+
+static void
+accept_conn_cb(struct evconnlistener *listener,
+    evutil_socket_t fd, struct sockaddr *address, int socklen,
+    void *ctx)
+{
+        rpcsvc *svc = ctx;
+
+        /* We got a new connection! Set up a bufferevent for it. */
+        struct event_base *base = evconnlistener_get_base(listener);
+        struct bufferevent *bev = bufferevent_socket_new(
+                base, fd, BEV_OPT_CLOSE_ON_FREE);
+
+        struct bufferevent *filtered_bev = bufferevent_filter_new (
+                        bev, filter_pbrpc_requests, NULL, BEV_OPT_CLOSE_ON_FREE,
+                        NULL, NULL);
+
+        bufferevent_setcb(filtered_bev, svc->reader, NULL, svc->notifier, svc);
+        bufferevent_enable(filtered_bev, EV_READ|EV_WRITE);
+}
+
+
+static void
+accept_error_cb(struct evconnlistener *listener, void *ctx)
+{
+        rpcsvc_destroy ((rpcsvc*) ctx);
+}
+
+
+int
+rpcsvc_register_methods (rpcsvc *svc, rpcsvc_fn_obj *methods)
+{
+        svc->methods = methods;
+        return 0;
+}
+
+
+int
+rpcsvc_destroy (rpcsvc *svc)
+{
+        struct event_base *base = evconnlistener_get_base(svc->listener);
+
+        int err = EVUTIL_SOCKET_ERROR();
+        fprintf(stderr, "Got an error %d (%s) on the listener. "
+                "Shutting down.\n", err, evutil_socket_error_to_string(err));
+        fflush(stderr);
+
+        free (svc);
+        return err;
+}
+
+static void
+rpcsvc_init (rpcsvc *svc, struct evconnlistener *listener,
+             bufferevent_data_cb reader, bufferevent_event_cb notifier)
+{
+        svc->listener = listener;
+        svc->reader   = reader;
+        svc->notifier = notifier;
+}
+
+rpcsvc*
+rpcsvc_new (const char *name, int16_t port, bufferevent_data_cb reader,
+            bufferevent_event_cb notifier)
+{
+        struct event_base *base = NULL;
+        struct sockaddr_in sin;
+        struct evconnlistener *listener = NULL;
+
+        rpcsvc *new = calloc (1, sizeof (*new));
+        if (!new)
+                return NULL;
+
+        base = event_base_new();
+        if (!base)
+                goto err;
+
+        /* Clear the sockaddr before using it, in case there are extra
+         * platform-specific fields that can mess us up. */
+        memset(&sin, 0, sizeof(sin));
+        /* This is an INET address */
+        sin.sin_family = AF_INET;
+        /* Listen on 0.0.0.0 */
+        //FIXME: @name is ignored. Use getaddrinfo(3) to fill in_addr appropriately.
+        sin.sin_addr.s_addr = htonl(0);
+        /* Listen on the given port. */
+        sin.sin_port = htons(port);
+
+        listener = evconnlistener_new_bind(base, accept_conn_cb, new,
+            LEV_OPT_CLOSE_ON_FREE|LEV_OPT_REUSEABLE, -1,
+            (struct sockaddr*)&sin, sizeof(sin));
+        if (!listener) {
+                perror("Couldn't create listener");
+                goto err;
+        }
+        evconnlistener_set_error_cb(listener, accept_error_cb);
+
+        rpcsvc_init (new, listener, reader, notifier);
+
+        return new;
+err:
+        free (new);
+        return NULL;
+}
+
+int
+rpcsvc_serve (rpcsvc *svc)
+{
+        struct evconnlistener *listener = svc->listener;
+        struct event_base *base = evconnlistener_get_base (listener);
+        return event_base_dispatch (base);
+}
+
 
 /*
  * RPC Format
@@ -48,37 +179,6 @@ static rpc_handler_func vtable[NUM_METHODS] =
  * -----------------------------------------------------
  *
  **/
-
-static int
-calculate (ProtobufCBinaryData *req, ProtobufCBinaryData *reply)
-{
-        Calc__CalcReq *creq;
-        Calc__CalcRsp crsp = CALC__CALC_RSP__INIT;
-        size_t rsplen;
-        int ret = 0;
-
-        creq = calc__calc_req__unpack (NULL, req->len, req->data);
-
-        /* method-specific logic */
-        switch(creq->op) {
-        default:
-                crsp.ret = creq->a + creq->b;
-        }
-
-        rsplen = calc__calc_rsp__get_packed_size(&crsp);
-        reply->data = calloc (1, rsplen);
-        if (!reply->data) {
-                ret = -1;
-                goto out;
-        }
-
-        reply->len = rsplen;
-        calc__calc_rsp__pack(&crsp, reply->data);
-out:
-        calc__calc_req__free_unpacked (creq, NULL);
-
-        return 0;
-}
 
 /*
  * pseudo code:
@@ -130,7 +230,7 @@ rpc_write_request (Pbcodec__PbRpcRequest *reqhdr, char **buf)
  * @buf is allocated by this function.
  * */
 int
-rpc_write_reply (Pbcodec__PbRpcResponse *rsphdr, char **buf)
+rpc_write_reply (rpcsvc *svc, Pbcodec__PbRpcResponse *rsphdr, char **buf)
 {
         uint64_t be_len = 0;
         if (!buf)
@@ -148,7 +248,8 @@ rpc_write_reply (Pbcodec__PbRpcResponse *rsphdr, char **buf)
 }
 
 int
-rpc_invoke_call (Pbcodec__PbRpcRequest *reqhdr, Pbcodec__PbRpcResponse *rsphdr)
+rpc_invoke_call (rpcsvc *svc, Pbcodec__PbRpcRequest *reqhdr,
+                 Pbcodec__PbRpcResponse *rsphdr)
 {
         int ret;
 
@@ -158,19 +259,15 @@ rpc_invoke_call (Pbcodec__PbRpcRequest *reqhdr, Pbcodec__PbRpcResponse *rsphdr)
         }
         rsphdr->id = reqhdr->id;
 
-        int idx = 0, method = -1;
-        for (idx = 0; idx < NUM_METHODS; idx++) {
-                if (!method_by_name[idx])
-                        continue;
-                if (strcmp (method_by_name[idx], reqhdr->method) == 0) {
-                        method = idx;
+        rpcsvc_fn_obj *method;
+        for (method = svc->methods; method; method++)
+                if (!strcmp (method->name, reqhdr->method))
                         break;
-                }
-        }
-        if (method == -1)
+
+        if (!method)
                 return -1;
 
-        ret = vtable[method] (&reqhdr->params, &rsphdr->result);
+        ret = method->fn (&reqhdr->params, &rsphdr->result);
 
         return ret;
 }
@@ -188,7 +285,7 @@ rpc_read_rsp (const char *msg, size_t msg_len)
 }
 
 Pbcodec__PbRpcRequest *
-rpc_read_req (const char* msg, size_t msg_len)
+rpc_read_req (rpcsvc *svc, const char* msg, size_t msg_len)
 {
         char *hdr;
         uint64_t proto_len = 0;

@@ -1,4 +1,5 @@
 #include "rpc.h"
+#include "calc.pb-c.h"
 #include <event2/listener.h>
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
@@ -18,6 +19,7 @@
 static void
 read_cb(struct bufferevent *bev, void *ctx)
 {
+        rpcsvc *svc = ctx;
         /* This callback is invoked when there is data to read on bev. */
         struct evbuffer *input = bufferevent_get_input(bev);
         struct evbuffer *output = bufferevent_get_output(bev);
@@ -31,14 +33,14 @@ read_cb(struct bufferevent *bev, void *ctx)
         } else {
                 int ret;
 
-                Pbcodec__PbRpcRequest *reqhdr = rpc_read_req (buf, read);
+                Pbcodec__PbRpcRequest *reqhdr = rpc_read_req (svc, buf, read);
                 Pbcodec__PbRpcResponse rsphdr = PBCODEC__PB_RPC_RESPONSE__INIT;
-                ret = rpc_invoke_call (reqhdr, &rsphdr);
+                ret = rpc_invoke_call (svc, reqhdr, &rsphdr);
                 if (ret) {
                         fprintf(stderr, "ret = %d: rpc_invoke_call failed\n", ret);
                 }
                 char *outbuf = NULL;
-                ret = rpc_write_reply (&rsphdr, &outbuf);
+                ret = rpc_write_reply (svc, &rsphdr, &outbuf);
                 if (ret <= 0) {
                         fprintf(stderr, "ret = %d: rpc_write_reply failed\n", ret);
                 }
@@ -59,72 +61,37 @@ event_cb(struct bufferevent *bev, short events, void *ctx)
         }
 }
 
-enum bufferevent_filter_result filter_pbrpc_requests (struct evbuffer *src,
-                struct evbuffer *dst, ev_ssize_t dst_limit,
-                enum bufferevent_flush_mode mode, void *ctx)
+static int
+calculate (ProtobufCBinaryData *req, ProtobufCBinaryData *reply)
 {
-        uint64_t message_len = 0;
-        size_t buf_len = 0;
-        size_t expected_len = 0;
-        size_t tmp = 0;
-        unsigned char *lenbuf = NULL;
+        Calc__CalcReq *creq;
+        Calc__CalcRsp crsp = CALC__CALC_RSP__INIT;
+        size_t rsplen;
+        int ret = 0;
 
-        //Read the message len
-        // evbuffer_pullup doesn't drain the buffer. It just makes sure that
-        // given number of bytes are contiguous, which allows us to easily copy
-        // out stuff.
-        lenbuf = evbuffer_pullup (src, sizeof(message_len));
-        if (!lenbuf)
-                return BEV_ERROR;
+        creq = calc__calc_req__unpack (NULL, req->len, req->data);
 
-        memcpy (&message_len, lenbuf, sizeof(message_len));
+        /* method-specific logic */
+        switch(creq->op) {
+        default:
+                crsp.ret = creq->a + creq->b;
+        }
 
-        message_len = be64toh (message_len);
+        rsplen = calc__calc_rsp__get_packed_size(&crsp);
+        reply->data = calloc (1, rsplen);
+        if (!reply->data) {
+                ret = -1;
+                goto out;
+        }
 
-        expected_len = sizeof (message_len) + message_len;
+        reply->len = rsplen;
+        calc__calc_rsp__pack(&crsp, reply->data);
+out:
+        calc__calc_req__free_unpacked (creq, NULL);
 
-        buf_len = evbuffer_get_length (src);
-
-        if (buf_len < expected_len)
-                return BEV_NEED_MORE;
-
-        tmp = evbuffer_remove_buffer
-                (src, dst, (sizeof(message_len) + message_len));
-        if (tmp != expected_len)
-                return BEV_ERROR;
-
-        return BEV_OK;
+        return 0;
 }
 
-static void
-accept_conn_cb(struct evconnlistener *listener,
-    evutil_socket_t fd, struct sockaddr *address, int socklen,
-    void *ctx)
-{
-        /* We got a new connection! Set up a bufferevent for it. */
-        struct event_base *base = evconnlistener_get_base(listener);
-        struct bufferevent *bev = bufferevent_socket_new(
-                base, fd, BEV_OPT_CLOSE_ON_FREE);
-
-        struct bufferevent *filtered_bev = bufferevent_filter_new (
-                        bev, filter_pbrpc_requests, NULL, BEV_OPT_CLOSE_ON_FREE,
-                        NULL, NULL);
-
-        bufferevent_setcb(filtered_bev, read_cb, NULL, event_cb, NULL);
-        bufferevent_enable(filtered_bev, EV_READ|EV_WRITE);
-}
-
-static void
-accept_error_cb(struct evconnlistener *listener, void *ctx)
-{
-        struct event_base *base = evconnlistener_get_base(listener);
-        int err = EVUTIL_SOCKET_ERROR();
-        fprintf(stderr, "Got an error %d (%s) on the listener. "
-                "Shutting down.\n", err, evutil_socket_error_to_string(err));
-        fflush(stdout);
-
-        event_base_loopexit(base, NULL);
-}
 
 int
 main(int argc, char **argv)
@@ -132,7 +99,12 @@ main(int argc, char **argv)
         struct event_base *base;
         struct evconnlistener *listener;
         struct sockaddr_in sin;
+        rpcsvc_fn_obj tbl[] = {
+                {calculate, "calculate"},
+                NULL
+        };
 
+        int ret = -1;
         int port = 9876;
 
         if (argc > 1) {
@@ -143,31 +115,24 @@ main(int argc, char **argv)
                 return 1;
         }
 
-        base = event_base_new();
-        if (!base) {
-                puts("Couldn't open event base");
+        rpcsvc *svc = rpcsvc_new ("localhost", 9876, read_cb, event_cb);
+        if (!svc) {
+                fprintf (stderr, "Failed to create a new rpcsvc object");
                 return 1;
         }
 
-        /* Clear the sockaddr before using it, in case there are extra
-         * platform-specific fields that can mess us up. */
-        memset(&sin, 0, sizeof(sin));
-        /* This is an INET address */
-        sin.sin_family = AF_INET;
-        /* Listen on 0.0.0.0 */
-        sin.sin_addr.s_addr = htonl(0);
-        /* Listen on the given port. */
-        sin.sin_port = htons(port);
-
-        listener = evconnlistener_new_bind(base, accept_conn_cb, NULL,
-            LEV_OPT_CLOSE_ON_FREE|LEV_OPT_REUSEABLE, -1,
-            (struct sockaddr*)&sin, sizeof(sin));
-        if (!listener) {
-                perror("Couldn't create listener");
+        ret = rpcsvc_register_methods (svc, tbl);
+        if (ret) {
+                fprintf (stderr, "Failed to register methods to rpcsvc.");
                 return 1;
         }
-        evconnlistener_set_error_cb(listener, accept_error_cb);
 
-        event_base_dispatch(base);
+        ret = rpcsvc_serve (svc);
+        if (ret) {
+                fprintf (stderr, "Failed to start libevent base loop for "
+                         "rpcsvc listener.");
+                return 1;
+        }
+
         return 0;
 }
