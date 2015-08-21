@@ -1,10 +1,5 @@
 #include "rpc.h"
 #include "calc.pb-c.h"
-#include <event2/listener.h>
-#include <event2/bufferevent.h>
-#include <event2/buffer.h>
-
-#include <arpa/inet.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -15,51 +10,6 @@
         fprintf(fp, "%s was called\n", # x);    \
         fflush(fp);                             \
 } while (0)
-
-static void
-read_cb(struct bufferevent *bev, void *ctx)
-{
-        rpcsvc *svc = ctx;
-        /* This callback is invoked when there is data to read on bev. */
-        struct evbuffer *input = bufferevent_get_input(bev);
-        struct evbuffer *output = bufferevent_get_output(bev);
-
-        /* Copy all the data from the input buffer to the output buffer. */
-        char buf[4096] = {0};
-        size_t read = bufferevent_read (bev, buf, sizeof (buf));
-        if (read < 0) {
-                perror("bufferevent_read failed");
-
-        } else {
-                int ret;
-
-                Pbcodec__PbRpcRequest *reqhdr = rpc_read_req (svc, buf, read);
-                Pbcodec__PbRpcResponse rsphdr = PBCODEC__PB_RPC_RESPONSE__INIT;
-                ret = rpc_invoke_call (svc, reqhdr, &rsphdr);
-                if (ret) {
-                        fprintf(stderr, "ret = %d: rpc_invoke_call failed\n", ret);
-                }
-                char *outbuf = NULL;
-                ret = rpc_write_reply (svc, &rsphdr, &outbuf);
-                if (ret <= 0) {
-                        fprintf(stderr, "ret = %d: rpc_write_reply failed\n", ret);
-                }
-
-                bufferevent_write (bev, outbuf, ret);
-                free(outbuf);
-        }
-
-}
-
-static void
-event_cb(struct bufferevent *bev, short events, void *ctx)
-{
-        if (events & BEV_EVENT_ERROR)
-                perror("Error from bufferevent");
-        if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
-                bufferevent_free(bev);
-        }
-}
 
 static int
 calculate (ProtobufCBinaryData *req, ProtobufCBinaryData *reply)
@@ -115,7 +65,7 @@ main(int argc, char **argv)
                 return 1;
         }
 
-        rpcsvc *svc = rpcsvc_new ("localhost", 9876, read_cb, event_cb);
+        rpcsvc *svc = rpcsvc_new ("localhost", 9876);
         if (!svc) {
                 fprintf (stderr, "Failed to create a new rpcsvc object");
                 return 1;

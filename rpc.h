@@ -45,24 +45,13 @@ typedef struct rpcclnt rpcclnt;
  *
  * @param port - the port on which the service needs to listening
  *
- * The following callbacks are registered on the accepted sockets.
- * Additionally, @param ctx in their callbacks is a pointer to a rpcsvc object
- * representing the underlying accepted connection.
- *
- * @reader - a callback which would be invoked after a pbrpc message is read
- *           into rpcsvc's buffers
- *
- * @notifier - a callback which would be invoked when an event occurs on
- *             rpcsvc's listening socket
- *
  * @return  - a pointer to a newly allocated rpcsvc object, or NULL if an error
  *            occurred
  *
  * */
 
 rpcsvc*
-rpcsvc_new (const char *hostname, int16_t port,  bufferevent_data_cb reader,
-            bufferevent_event_cb notifier);
+rpcsvc_new (const char *hostname, int16_t port);
 
 
 /**

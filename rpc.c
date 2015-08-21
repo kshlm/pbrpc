@@ -14,6 +14,57 @@
 #include "pbrpc.pb-c.h"
 #include "calc.pb-c.h"
 
+static void
+read_cb(struct bufferevent *bev, void *ctx)
+{
+        rpcsvc          *svc  = ctx;
+        char            *buf  = NULL;
+        struct evbuffer *in   = NULL;
+        size_t           len  = 0;
+        size_t           read = 0;
+
+        in = bufferevent_get_input (bev);
+        len = evbuffer_get_length (in);
+        buf = calloc (1, len);
+        if (!buf) {
+                fprintf (stderr, "Failed to allocate memory\n");
+                return;
+        }
+        read = bufferevent_read (bev, buf, len);
+        if (read < 0) {
+                perror("bufferevent_read failed");
+
+        } else {
+                int ret;
+
+                Pbcodec__PbRpcRequest *reqhdr = rpc_read_req (svc, buf, read);
+                Pbcodec__PbRpcResponse rsphdr = PBCODEC__PB_RPC_RESPONSE__INIT;
+                ret = rpc_invoke_call (svc, reqhdr, &rsphdr);
+                if (ret) {
+                        fprintf(stderr, "ret = %d: rpc_invoke_call failed\n", ret);
+                }
+                char *outbuf = NULL;
+                ret = rpc_write_reply (svc, &rsphdr, &outbuf);
+                if (ret <= 0) {
+                        fprintf(stderr, "ret = %d: rpc_write_reply failed\n", ret);
+                }
+
+                bufferevent_write (bev, outbuf, ret);
+                free(outbuf);
+        }
+        free (buf);
+}
+
+static void
+event_cb(struct bufferevent *bev, short events, void *ctx)
+{
+        if (events & BEV_EVENT_ERROR)
+                perror("Error from bufferevent");
+        if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
+                bufferevent_free(bev);
+        }
+}
+
 static enum bufferevent_filter_result
 filter_pbrpc_requests (struct evbuffer *src,
                 struct evbuffer *dst, ev_ssize_t dst_limit,
@@ -112,8 +163,7 @@ rpcsvc_init (rpcsvc *svc, struct evconnlistener *listener,
 }
 
 rpcsvc*
-rpcsvc_new (const char *name, int16_t port, bufferevent_data_cb reader,
-            bufferevent_event_cb notifier)
+rpcsvc_new (const char *name, int16_t port)
 {
         struct event_base *base = NULL;
         struct sockaddr_in sin;
@@ -147,7 +197,7 @@ rpcsvc_new (const char *name, int16_t port, bufferevent_data_cb reader,
         }
         evconnlistener_set_error_cb(listener, accept_error_cb);
 
-        rpcsvc_init (new, listener, reader, notifier);
+        rpcsvc_init (new, listener, read_cb, event_cb);
 
         return new;
 err:
