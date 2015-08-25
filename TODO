@@ -1,0 +1,4 @@
+- Finish API documentation
+- Add multiple RPC calls in client.c
+- Make rpcclnt_mainloop pthread_create friendly
+- Make rpcclnt_destroy 'thread-safe'
