@@ -1,4 +1,4 @@
-#include "../rpc.h"
+#include "../pbrpc.h"
 #include "calc.pb-c.h"
 
 #include <string.h>
@@ -49,7 +49,7 @@ main(int argc, char **argv)
         struct event_base *base;
         struct evconnlistener *listener;
         struct sockaddr_in sin;
-        rpcsvc_fn_obj tbl[] = {
+        pbrpc_svc_fn_obj tbl[] = {
                 {calculate, "calculate"},
                 NULL
         };
@@ -65,22 +65,22 @@ main(int argc, char **argv)
                 return 1;
         }
 
-        rpcsvc *svc = rpcsvc_new ("localhost", 9876);
+        pbrpc_svc *svc = pbrpc_svc_new ("localhost", 9876);
         if (!svc) {
-                fprintf (stderr, "Failed to create a new rpcsvc object");
+                fprintf (stderr, "Failed to create a new pbrpc_svc object");
                 return 1;
         }
 
-        ret = rpcsvc_register_methods (svc, tbl);
+        ret = pbrpc_svc_register_methods (svc, tbl);
         if (ret) {
-                fprintf (stderr, "Failed to register methods to rpcsvc.");
+                fprintf (stderr, "Failed to register methods to pbrpc_svc.");
                 return 1;
         }
 
-        ret = rpcsvc_serve (svc);
+        ret = pbrpc_svc_serve (svc);
         if (ret) {
                 fprintf (stderr, "Failed to start libevent base loop for "
-                         "rpcsvc listener.");
+                         "pbrpc_svc listener.");
                 return 1;
         }
 

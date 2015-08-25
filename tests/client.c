@@ -1,5 +1,5 @@
 #include "calc.pb-c.h"
-#include "../rpc.h"
+#include "../pbrpc.h"
 #include "../pbrpc-clnt.h"
 
 #include <inttypes.h>

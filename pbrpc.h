@@ -10,19 +10,19 @@
 /**
  * Rpcsvc method type
  */
-typedef int (*rpcsvc_fn) (ProtobufCBinaryData *req,
+typedef int (*pbrpc_svc_fn) (ProtobufCBinaryData *req,
                           ProtobufCBinaryData *rsp);
 /**
  * Rpcsvc method entry
  */
-struct rpcsvc_fn_obj {
-        rpcsvc_fn fn;
+struct pbrpc_svc_fn_obj {
+        pbrpc_svc_fn fn;
         char *name;
 };
 
-typedef struct rpcsvc_fn_obj rpcsvc_fn_obj;
+typedef struct pbrpc_svc_fn_obj pbrpc_svc_fn_obj;
 
-struct rpcsvc {
+struct pbrpc_svc {
         struct evconnlistener *listener;
         void *ctx;
         /**
@@ -30,10 +30,10 @@ struct rpcsvc {
          * */
         bufferevent_data_cb reader;
         bufferevent_event_cb notifier;
-        rpcsvc_fn_obj *methods;
+        pbrpc_svc_fn_obj *methods;
 };
 
-typedef struct rpcsvc rpcsvc;
+typedef struct pbrpc_svc pbrpc_svc;
 
 
 /**
@@ -44,37 +44,37 @@ typedef struct rpcsvc rpcsvc;
  *
  * @param port - the port on which the service needs to listening
  *
- * @return  - a pointer to a newly allocated rpcsvc object, or NULL if an error
+ * @return  - a pointer to a newly allocated pbrpc_svc object, or NULL if an error
  *            occurred
  *
  * */
 
-rpcsvc*
-rpcsvc_new (const char *hostname, int16_t port);
+pbrpc_svc*
+pbrpc_svc_new (const char *hostname, int16_t port);
 
 
 /**
- * Registers RPC methods with a rpcsvc object
+ * Registers RPC methods with a pbrpc_svc object
  *
  * @param svc - the service object
- * @param methods - a list of functions that are exported via @rpcsvc
+ * @param methods - a list of functions that are exported via @pbrpc_svc
  * @return - 0 on success, -1 on failure
  *
  * */
 int
-rpcsvc_register_methods (rpcsvc *svc, rpcsvc_fn_obj *methods);
+pbrpc_svc_register_methods (pbrpc_svc *svc, pbrpc_svc_fn_obj *methods);
 
 
 /**
  * Starts the event_base_loop (ref: libevent2) to listen for requests on @svc.
- * Blocks the current thread until rpcsvc_destroy is called
+ * Blocks the current thread until pbrpc_svc_destroy is called
  *
  * @param svc - the service object
  * @return - 0 on success, -1 on failure
  *
  * */
 int
-rpcsvc_serve (rpcsvc *svc);
+pbrpc_svc_serve (pbrpc_svc *svc);
 
 
 /**
@@ -83,7 +83,7 @@ rpcsvc_serve (rpcsvc *svc);
  *
  * */
 int
-rpcsvc_destroy (rpcsvc* svc);
+pbrpc_svc_destroy (pbrpc_svc* svc);
 
 
 /* Rpcproto Method constants */
@@ -95,13 +95,13 @@ typedef int (*rpc_handler_func) (ProtobufCBinaryData *req,
                                  ProtobufCBinaryData *reply);
 
 Pbcodec__PbRpcRequest *
-rpc_read_req (rpcsvc *svc, const char* msg, size_t msg_len);
+rpc_read_req (pbrpc_svc *svc, const char* msg, size_t msg_len);
 
 int
-rpc_write_reply (rpcsvc *svc, Pbcodec__PbRpcResponse *rsphdr, char **buf);
+rpc_write_reply (pbrpc_svc *svc, Pbcodec__PbRpcResponse *rsphdr, char **buf);
 
 int
-rpc_invoke_call (rpcsvc *svc, Pbcodec__PbRpcRequest *reqhdr,
+rpc_invoke_call (pbrpc_svc *svc, Pbcodec__PbRpcRequest *reqhdr,
                  Pbcodec__PbRpcResponse *rsphdr);
 
 #endif

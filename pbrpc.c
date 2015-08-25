@@ -10,14 +10,14 @@
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
 
-#include "rpc.h"
+#include "pbrpc.h"
 #include "pbrpc.pb-c.h"
 
 
 static void
 svc_read_cb(struct bufferevent *bev, void *ctx)
 {
-        rpcsvc          *svc  = ctx;
+        pbrpc_svc          *svc  = ctx;
         char            *buf  = NULL;
         struct evbuffer *in   = NULL;
         size_t           len  = 0;
@@ -112,7 +112,7 @@ accept_conn_cb(struct evconnlistener *listener,
     evutil_socket_t fd, struct sockaddr *address, int socklen,
     void *ctx)
 {
-        rpcsvc *svc = ctx;
+        pbrpc_svc *svc = ctx;
 
         /* We got a new connection! Set up a bufferevent for it. */
         struct event_base *base = evconnlistener_get_base(listener);
@@ -135,12 +135,12 @@ accept_error_cb(struct evconnlistener *listener, void *ctx)
         fprintf(stderr, "Got an error %d (%s) on the listener. "
                 "Shutting down.\n", err, evutil_socket_error_to_string(err));
         fflush(stderr);
-        rpcsvc_destroy ((rpcsvc*) ctx);
+        pbrpc_svc_destroy ((pbrpc_svc*) ctx);
 }
 
 
 int
-rpcsvc_register_methods (rpcsvc *svc, rpcsvc_fn_obj *methods)
+pbrpc_svc_register_methods (pbrpc_svc *svc, pbrpc_svc_fn_obj *methods)
 {
         svc->methods = methods;
         return 0;
@@ -148,7 +148,7 @@ rpcsvc_register_methods (rpcsvc *svc, rpcsvc_fn_obj *methods)
 
 
 int
-rpcsvc_destroy (rpcsvc *svc)
+pbrpc_svc_destroy (pbrpc_svc *svc)
 {
         struct event_base *base = evconnlistener_get_base(svc->listener);
 
@@ -160,7 +160,7 @@ rpcsvc_destroy (rpcsvc *svc)
 
 
 static void
-rpcsvc_init (rpcsvc *svc, struct evconnlistener *listener,
+pbrpc_svc_init (pbrpc_svc *svc, struct evconnlistener *listener,
              bufferevent_data_cb reader, bufferevent_event_cb notifier)
 {
         svc->listener = listener;
@@ -169,14 +169,14 @@ rpcsvc_init (rpcsvc *svc, struct evconnlistener *listener,
 }
 
 
-rpcsvc*
-rpcsvc_new (const char *name, int16_t port)
+pbrpc_svc*
+pbrpc_svc_new (const char *name, int16_t port)
 {
         struct event_base *base = NULL;
         struct sockaddr_in sin;
         struct evconnlistener *listener = NULL;
 
-        rpcsvc *new = calloc (1, sizeof (*new));
+        pbrpc_svc *new = calloc (1, sizeof (*new));
         if (!new)
                 return NULL;
 
@@ -204,7 +204,7 @@ rpcsvc_new (const char *name, int16_t port)
         }
         evconnlistener_set_error_cb(listener, accept_error_cb);
 
-        rpcsvc_init (new, listener, svc_read_cb, svc_event_cb);
+        pbrpc_svc_init (new, listener, svc_read_cb, svc_event_cb);
 
         return new;
 err:
@@ -214,7 +214,7 @@ err:
 
 
 int
-rpcsvc_serve (rpcsvc *svc)
+pbrpc_svc_serve (pbrpc_svc *svc)
 {
         struct evconnlistener *listener = svc->listener;
         struct event_base *base = evconnlistener_get_base (listener);
@@ -292,7 +292,7 @@ rpc_write_request (pbrpc_clnt *clnt, Pbcodec__PbRpcRequest *reqhdr, char **buf)
  * @buf is allocated by this function.
  * */
 int
-rpc_write_reply (rpcsvc *svc, Pbcodec__PbRpcResponse *rsphdr, char **buf)
+rpc_write_reply (pbrpc_svc *svc, Pbcodec__PbRpcResponse *rsphdr, char **buf)
 {
         uint64_t be_len = 0;
         if (!buf)
@@ -310,7 +310,7 @@ rpc_write_reply (rpcsvc *svc, Pbcodec__PbRpcResponse *rsphdr, char **buf)
 }
 
 int
-rpc_invoke_call (rpcsvc *svc, Pbcodec__PbRpcRequest *reqhdr,
+rpc_invoke_call (pbrpc_svc *svc, Pbcodec__PbRpcRequest *reqhdr,
                  Pbcodec__PbRpcResponse *rsphdr)
 {
         int ret;
@@ -321,7 +321,7 @@ rpc_invoke_call (rpcsvc *svc, Pbcodec__PbRpcRequest *reqhdr,
         }
         rsphdr->id = reqhdr->id;
 
-        rpcsvc_fn_obj *method;
+        pbrpc_svc_fn_obj *method;
         for (method = svc->methods; method; method++)
                 if (!strcmp (method->name, reqhdr->method))
                         break;
@@ -347,7 +347,7 @@ rpc_read_rsp (const char *msg, size_t msg_len)
 }
 
 Pbcodec__PbRpcRequest *
-rpc_read_req (rpcsvc *svc, const char* msg, size_t msg_len)
+rpc_read_req (pbrpc_svc *svc, const char* msg, size_t msg_len)
 {
         char *hdr;
         uint64_t proto_len = 0;
