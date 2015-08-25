@@ -1,4 +1,4 @@
-#include "rpc.h"
+#include "../rpc.h"
 #include "calc.pb-c.h"
 
 #include <string.h>

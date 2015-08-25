@@ -12,7 +12,6 @@
 
 #include "rpc.h"
 #include "pbrpc.pb-c.h"
-#include "calc.pb-c.h"
 
 
 static void

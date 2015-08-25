@@ -1,7 +1,6 @@
 #include "calc.pb-c.h"
-#include "pbrpc.pb-c.h"
-#include "rpc.h"
-#include "rpcclnt.h"
+#include "../rpc.h"
+#include "../rpcclnt.h"
 
 #include <inttypes.h>
 #include <event2/event.h>
