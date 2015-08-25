@@ -16,7 +16,7 @@ set(MINIPROTOSRC ${CMAKE_SOURCE_DIR}/pbrpc.pb-c.c ${CMAKE_SOURCE_DIR}/pbrpc.pb-c
 
   set(MINIRPCSRC ${MINIPROTOSRC} ${TESTPROTOSRC} ${CMAKE_SOURCE_DIR}/rpc.c
          ${CMAKE_SOURCE_DIR}/rpc.h
-         ${CMAKE_SOURCE_DIR}/rpcclnt.h
+         ${CMAKE_SOURCE_DIR}/pbrpc-clnt.h
          ${CMAKE_SOURCE_DIR}/list.h)
 add_library(pbminirpc SHARED ${MINIRPCSRC})
 target_link_libraries(pbminirpc ${PROTOC_LIBRARIES} ${LIBEVENT_LIBRARIES})

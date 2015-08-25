@@ -1,6 +1,6 @@
 #include "calc.pb-c.h"
 #include "../rpc.h"
-#include "../rpcclnt.h"
+#include "../pbrpc-clnt.h"
 
 #include <inttypes.h>
 #include <event2/event.h>
@@ -18,16 +18,16 @@
 static void*
 mainloop (void *arg)
 {
-        rpcclnt *clnt = arg;
+        pbrpc_clnt *clnt = arg;
 
-        rpcclnt_mainloop (clnt);
+        pbrpc_clnt_mainloop (clnt);
 
         return NULL;
 }
 
 
 int
-calc_cbk (rpcclnt *clnt, ProtobufCBinaryData *msg, int ret)
+calc_cbk (pbrpc_clnt *clnt, ProtobufCBinaryData *msg, int ret)
 {
         if (ret)
                 return ret;
@@ -42,18 +42,18 @@ calc_cbk (rpcclnt *clnt, ProtobufCBinaryData *msg, int ret)
 int main(int argc, char **argv)
 {
         int ret;
-        rpcclnt *clnt = NULL;
+        pbrpc_clnt *clnt = NULL;
 
-        clnt = rpcclnt_new ("localhost", 9876);
+        clnt = pbrpc_clnt_new ("localhost", 9876);
         if (!clnt) {
-                fprintf (stderr, "Failed to create an rpcclnt object\n");
+                fprintf (stderr, "Failed to create an pbrpc_clnt object\n");
                 return 1;
         }
 
         pthread_t tid;
         ret = pthread_create (&tid, NULL, mainloop, clnt);
         if (ret) {
-                rpcclnt_destroy (clnt);
+                pbrpc_clnt_destroy (clnt);
                 return ret;
         }
 
@@ -67,7 +67,7 @@ int main(int argc, char **argv)
         msg.len = clen;
         msg.data = cbuf;
 
-        ret = rpcclnt_call (clnt, "calculate", &msg, calc_cbk);
+        ret = pbrpc_clnt_call (clnt, "calculate", &msg, calc_cbk);
         if (ret) {
                 fprintf (stderr, "RPC call failed\n");
         }

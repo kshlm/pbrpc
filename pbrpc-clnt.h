@@ -1,5 +1,5 @@
-#ifndef _RPCCLNT_H
-#define _RPCCLNT_H
+#ifndef _PBRPC_CLNT_H
+#define _PBRPC_CLNT_H
 
 #include <event2/bufferevent.h>
 #include <event2/event.h>
@@ -9,19 +9,19 @@
 #include "pbrpc.pb-c.h"
 
 
-struct rpcclnt {
+struct pbrpc_clnt {
         struct bufferevent *bev;
         struct list_head outstanding;
         void *ctx;
 };
 
-typedef struct rpcclnt rpcclnt;
+typedef struct pbrpc_clnt pbrpc_clnt;
 
 
 /**
  * Rpcclnt callback
  */
-typedef int (*rpcclnt_cbk) (rpcclnt *clnt, ProtobufCBinaryData *res, int ret);
+typedef int (*pbrpc_clnt_cbk) (pbrpc_clnt *clnt, ProtobufCBinaryData *res, int ret);
 
 
 /**
@@ -29,7 +29,7 @@ typedef int (*rpcclnt_cbk) (rpcclnt *clnt, ProtobufCBinaryData *res, int ret);
  */
 struct saved_req {
         int32_t id;
-        rpcclnt_cbk cbk;
+        pbrpc_clnt_cbk cbk;
         struct list_head list;
 };
 
@@ -44,11 +44,11 @@ struct saved_req {
  *
  * @param port - The port of the RPC service
  *
- * @return - a pointer to a newly allocated rpcclnt object, or NULL if an error
+ * @return - a pointer to a newly allocated pbrpc_clnt object, or NULL if an error
  * occurred
  *
  */
-rpcclnt * rpcclnt_new (const char *host, int16_t port);
+pbrpc_clnt * pbrpc_clnt_new (const char *host, int16_t port);
 
 
 /**
@@ -59,7 +59,7 @@ rpcclnt * rpcclnt_new (const char *host, int16_t port);
  * @return 0 on success, -1 otherwise.
  */
 int
-rpcclnt_destroy (rpcclnt *clnt);
+pbrpc_clnt_destroy (pbrpc_clnt *clnt);
 
 
 /**
@@ -71,14 +71,14 @@ rpcclnt_destroy (rpcclnt *clnt);
  * @return 0 on success, -1 otherwise
  */
 int
-rpcclnt_mainloop (rpcclnt *clnt);
+pbrpc_clnt_mainloop (pbrpc_clnt *clnt);
 
 
 /**
  *
  * Calls the remote service identified by @clnt
  *
- * @param clnt - rpcclnt object representing the remote server
+ * @param clnt - pbrpc_clnt object representing the remote server
  *
  * @param method - string representation of the RPC method to be called.
  *
@@ -89,8 +89,8 @@ rpcclnt_mainloop (rpcclnt *clnt);
  * @return - 0 on success and -1 otherwise
  */
 int
-rpcclnt_call (rpcclnt *clnt, const char *method, ProtobufCBinaryData *msg,
-              rpcclnt_cbk cbk);
+pbrpc_clnt_call (pbrpc_clnt *clnt, const char *method, ProtobufCBinaryData *msg,
+              pbrpc_clnt_cbk cbk);
 
 
 Pbcodec__PbRpcResponse *
@@ -98,6 +98,6 @@ rpc_read_rsp (const char* msg, size_t msg_len);
 
 
 int
-rpc_write_request (rpcclnt *clnt, Pbcodec__PbRpcRequest *reqhdr, char **buf);
+rpc_write_request (pbrpc_clnt *clnt, Pbcodec__PbRpcRequest *reqhdr, char **buf);
 
 #endif

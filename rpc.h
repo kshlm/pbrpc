@@ -5,7 +5,7 @@
 #include <event2/event.h>
 
 #include "pbrpc.pb-c.h"
-#include "rpcclnt.h"
+#include "pbrpc-clnt.h"
 
 /**
  * Rpcsvc method type

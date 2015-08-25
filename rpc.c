@@ -268,7 +268,7 @@ rpcsvc_serve (rpcsvc *svc)
  * @buf is allocated by this function.
  * */
 int
-rpc_write_request (rpcclnt *clnt, Pbcodec__PbRpcRequest *reqhdr, char **buf)
+rpc_write_request (pbrpc_clnt *clnt, Pbcodec__PbRpcRequest *reqhdr, char **buf)
 {
         uint64_t be_len = 0;
         if (!buf)
@@ -361,7 +361,7 @@ rpc_read_req (rpcsvc *svc, const char* msg, size_t msg_len)
 void
 clnt_read_cb (struct bufferevent *bev, void *ctx)
 {
-        rpcclnt         *clnt = ctx;
+        pbrpc_clnt         *clnt = ctx;
         char            *buf  = NULL;
         struct evbuffer *in   = NULL;
         size_t           len  = 0;
@@ -427,7 +427,7 @@ clnt_event_cb (struct bufferevent *bev, short events, void *ctx)
 
 
 int
-rpcclnt_destroy (rpcclnt *clnt)
+pbrpc_clnt_destroy (pbrpc_clnt *clnt)
 {
         struct event_base *base;
         struct bufferevent *bev;
@@ -445,10 +445,10 @@ rpcclnt_destroy (rpcclnt *clnt)
 }
 
 
-rpcclnt *
-rpcclnt_new (const char *host, int16_t port)
+pbrpc_clnt *
+pbrpc_clnt_new (const char *host, int16_t port)
 {
-        rpcclnt *clnt = NULL;
+        pbrpc_clnt *clnt = NULL;
         struct event_base *base;
         int ret;
 
@@ -498,7 +498,7 @@ err:
 
 
 int
-rpcclnt_mainloop (rpcclnt *clnt)
+pbrpc_clnt_mainloop (pbrpc_clnt *clnt)
 {
         struct event_base *base = bufferevent_get_base (clnt->bev);
 
@@ -510,8 +510,8 @@ rpcclnt_mainloop (rpcclnt *clnt)
 
 
 int
-rpcclnt_call (rpcclnt *clnt, const char *method, ProtobufCBinaryData *msg,
-              rpcclnt_cbk cbk)
+pbrpc_clnt_call (pbrpc_clnt *clnt, const char *method,
+                 ProtobufCBinaryData *msg, pbrpc_clnt_cbk cbk)
 {
         Pbcodec__PbRpcRequest reqhdr = PBCODEC__PB_RPC_REQUEST__INIT;
         int       ret = -1;
