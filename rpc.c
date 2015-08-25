@@ -14,8 +14,9 @@
 #include "pbrpc.pb-c.h"
 #include "calc.pb-c.h"
 
+
 static void
-read_cb(struct bufferevent *bev, void *ctx)
+svc_read_cb(struct bufferevent *bev, void *ctx)
 {
         rpcsvc          *svc  = ctx;
         char            *buf  = NULL;
@@ -49,14 +50,16 @@ read_cb(struct bufferevent *bev, void *ctx)
                         fprintf(stderr, "ret = %d: rpc_write_reply failed\n", ret);
                 }
 
+                pbcodec__pb_rpc_request__free_unpacked (reqhdr, NULL);
                 bufferevent_write (bev, outbuf, ret);
                 free(outbuf);
         }
         free (buf);
 }
 
+
 static void
-event_cb(struct bufferevent *bev, short events, void *ctx)
+svc_event_cb(struct bufferevent *bev, short events, void *ctx)
 {
         if (events & BEV_EVENT_ERROR)
                 perror("Error from bufferevent");
@@ -65,8 +68,9 @@ event_cb(struct bufferevent *bev, short events, void *ctx)
         }
 }
 
+
 static enum bufferevent_filter_result
-filter_pbrpc_requests (struct evbuffer *src,
+filter_pbrpc_messages (struct evbuffer *src,
                 struct evbuffer *dst, ev_ssize_t dst_limit,
                 enum bufferevent_flush_mode mode, void *ctx)
 {
@@ -76,12 +80,12 @@ filter_pbrpc_requests (struct evbuffer *src,
         size_t tmp = 0;
         unsigned char *lenbuf = NULL;
 
-        //Read the message len
-        // evbuffer_pullup doesn't drain the buffer. It just makes sure that
-        // given number of bytes are contiguous, which allows us to easily copy
-        // out stuff.
-        lenbuf = evbuffer_pullup (src, sizeof(message_len));
-        if (!lenbuf)
+        /**
+         * Read the message len evbuffer_pullup doesn't drain the buffer. It
+         * just makes sure that given number of bytes are contiguous, which
+         * allows us to easily copy out stuff.
+         */
+        lenbuf = evbuffer_pullup (src, sizeof(message_len)); if (!lenbuf)
                 return BEV_ERROR;
 
         memcpy (&message_len, lenbuf, sizeof(message_len));
@@ -103,6 +107,7 @@ filter_pbrpc_requests (struct evbuffer *src,
         return BEV_OK;
 }
 
+
 static void
 accept_conn_cb(struct evconnlistener *listener,
     evutil_socket_t fd, struct sockaddr *address, int socklen,
@@ -116,7 +121,7 @@ accept_conn_cb(struct evconnlistener *listener,
                 base, fd, BEV_OPT_CLOSE_ON_FREE);
 
         struct bufferevent *filtered_bev = bufferevent_filter_new (
-                        bev, filter_pbrpc_requests, NULL, BEV_OPT_CLOSE_ON_FREE,
+                        bev, filter_pbrpc_messages, NULL, BEV_OPT_CLOSE_ON_FREE,
                         NULL, NULL);
 
         bufferevent_setcb(filtered_bev, svc->reader, NULL, svc->notifier, svc);
@@ -127,6 +132,10 @@ accept_conn_cb(struct evconnlistener *listener,
 static void
 accept_error_cb(struct evconnlistener *listener, void *ctx)
 {
+        int err = EVUTIL_SOCKET_ERROR();
+        fprintf(stderr, "Got an error %d (%s) on the listener. "
+                "Shutting down.\n", err, evutil_socket_error_to_string(err));
+        fflush(stderr);
         rpcsvc_destroy ((rpcsvc*) ctx);
 }
 
@@ -144,14 +153,12 @@ rpcsvc_destroy (rpcsvc *svc)
 {
         struct event_base *base = evconnlistener_get_base(svc->listener);
 
-        int err = EVUTIL_SOCKET_ERROR();
-        fprintf(stderr, "Got an error %d (%s) on the listener. "
-                "Shutting down.\n", err, evutil_socket_error_to_string(err));
-        fflush(stderr);
-
+        event_base_loopexit(base, NULL);
+        event_base_free (base);
         free (svc);
-        return err;
+        return 0;
 }
+
 
 static void
 rpcsvc_init (rpcsvc *svc, struct evconnlistener *listener,
@@ -161,6 +168,7 @@ rpcsvc_init (rpcsvc *svc, struct evconnlistener *listener,
         svc->reader   = reader;
         svc->notifier = notifier;
 }
+
 
 rpcsvc*
 rpcsvc_new (const char *name, int16_t port)
@@ -197,7 +205,7 @@ rpcsvc_new (const char *name, int16_t port)
         }
         evconnlistener_set_error_cb(listener, accept_error_cb);
 
-        rpcsvc_init (new, listener, read_cb, event_cb);
+        rpcsvc_init (new, listener, svc_read_cb, svc_event_cb);
 
         return new;
 err:
@@ -205,11 +213,13 @@ err:
         return NULL;
 }
 
+
 int
 rpcsvc_serve (rpcsvc *svc)
 {
         struct evconnlistener *listener = svc->listener;
         struct event_base *base = evconnlistener_get_base (listener);
+
         return event_base_dispatch (base);
 }
 
@@ -234,13 +244,13 @@ rpcsvc_serve (rpcsvc *svc)
  * pseudo code:
  *
  * read buffer from network
- * reqhdr = rpc_read_req (msg, len);
+ * reqhdr = rpc_read_req (svc, msg, len);
  * rsphdr = RSP_HEADER__INIT;
- * ret = rpc_invoke_call (reqhdr, &rsphdr)
+ * ret = rpc_invoke_call (svc, reqhdr, &rsphdr)
  * if (ret)
  *   goto out;
  * char *buf = NULL;
- * ret = rpc_write_reply (&rsphdr, &buf);
+ * ret = rpc_write_reply (svc, &rsphdr, &buf);
  * if (ret != -1)
  *   goto out;
  *
@@ -259,7 +269,7 @@ rpcsvc_serve (rpcsvc *svc)
  * @buf is allocated by this function.
  * */
 int
-rpc_write_request (Pbcodec__PbRpcRequest *reqhdr, char **buf)
+rpc_write_request (rpcclnt *clnt, Pbcodec__PbRpcRequest *reqhdr, char **buf)
 {
         uint64_t be_len = 0;
         if (!buf)
@@ -273,8 +283,11 @@ rpc_write_request (Pbcodec__PbRpcRequest *reqhdr, char **buf)
         pbcodec__pb_rpc_request__pack(reqhdr, *buf+8);
         be_len = htobe64 (reqlen);
         memcpy(*buf, &be_len, sizeof(uint64_t));
+        bufferevent_write(clnt->bev, *buf, reqlen + sizeof (uint64_t));
+
         return reqlen + sizeof(uint64_t);
 }
+
 
 /* returns the no. of bytes written to @buf
  * @buf is allocated by this function.
@@ -343,4 +356,192 @@ rpc_read_req (rpcsvc *svc, const char* msg, size_t msg_len)
         memcpy (&proto_len, msg, sizeof(uint64_t));
         proto_len = be64toh (proto_len);
         return pbcodec__pb_rpc_request__unpack (NULL, proto_len, msg+sizeof(proto_len));
+}
+
+
+void
+clnt_read_cb (struct bufferevent *bev, void *ctx)
+{
+        rpcclnt         *clnt = ctx;
+        char            *buf  = NULL;
+        struct evbuffer *in   = NULL;
+        size_t           len  = 0;
+        size_t           read = 0;
+        Pbcodec__PbRpcResponse *rsp = NULL;
+
+        in = bufferevent_get_input (bev);
+        len = evbuffer_get_length (in);
+        buf = calloc (1, len);
+        if (!buf) {
+                fprintf (stderr, "Failed to allocate memory\n");
+                return;
+        }
+        read = bufferevent_read (bev, buf, len);
+        if (read < 0) {
+                perror("bufferevent_read failed");
+                goto out;
+
+        }
+        int ret;
+        rsp = rpc_read_rsp (buf, read);
+        if (!rsp) {
+                fprintf (stderr, "Failed to parse response "
+                         "from server\n");
+                return;
+        }
+
+        struct saved_req *call, *tmp;
+        char found = 0;
+
+        list_for_each_entry_safe (call, tmp, &clnt->outstanding, list) {
+                if (call->id == rsp->id) {
+                        list_del_init (&call->list);
+                        found = 1;
+                        break;
+                }
+
+        }
+        if (!found) {
+                fprintf (stderr, "Failed to find the corresponding "
+                         "pending call request\n");
+                goto out;
+        }
+
+        call->cbk (clnt, &rsp->result, 0);
+        free (call);
+
+out:
+        pbcodec__pb_rpc_response__free_unpacked (rsp, NULL);
+        free (buf);
+}
+
+
+void
+clnt_event_cb (struct bufferevent *bev, short events, void *ctx)
+{
+        if (events & BEV_EVENT_ERROR)
+                perror("Error from bufferevent");
+        if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
+                bufferevent_free(bev);
+        }
+}
+
+
+int
+rpcclnt_destroy (rpcclnt *clnt)
+{
+        struct event_base *base;
+        struct bufferevent *bev;
+
+        bev = clnt->bev;
+        clnt->bev = NULL;
+
+        base = bufferevent_get_base (bev);
+        event_base_loopexit (base, NULL);
+        event_base_free (base);
+        bufferevent_free (bev);
+        free (clnt);
+
+        return 0;
+}
+
+
+rpcclnt *
+rpcclnt_new (const char *host, int16_t port)
+{
+        rpcclnt *clnt = NULL;
+        struct event_base *base;
+        int ret;
+
+        clnt = calloc (1, sizeof (*clnt));
+        if (!clnt)
+                return NULL;
+
+        base = event_base_new ();
+        if (!base) {
+                fprintf(stderr, "failed to create event base\n");
+                goto err;
+        }
+
+        struct bufferevent *bev = bufferevent_socket_new (base, -1,
+                                                          BEV_OPT_CLOSE_ON_FREE);
+        if (!bev) {
+                fprintf(stderr, "failed to create bufferevent\n");
+                goto err;
+        }
+        //FIXME: connect to @host supplied
+        ret = bufferevent_socket_connect_hostname (bev, NULL, AF_INET,
+                                                   "localhost", 9876);
+        if (ret) {
+                perror("connect failed");
+                goto err;
+        }
+
+        struct bufferevent *filtered_bev = bufferevent_filter_new (
+                        bev, filter_pbrpc_messages, NULL, BEV_OPT_CLOSE_ON_FREE,
+                        NULL, NULL);
+
+        bufferevent_setcb (filtered_bev, clnt_read_cb, NULL, clnt_event_cb, clnt);
+        bufferevent_enable (filtered_bev, EV_READ|EV_WRITE);
+
+        INIT_LIST_HEAD (&clnt->outstanding);
+        clnt->bev = filtered_bev;
+        return clnt;
+err:
+        if (bev)
+                bufferevent_free (bev);
+
+        if (base)
+                event_base_free (base);
+
+        return NULL;
+}
+
+
+int
+rpcclnt_mainloop (rpcclnt *clnt)
+{
+        struct event_base *base = bufferevent_get_base (clnt->bev);
+
+        if (!base)
+                return -1;
+
+        return event_base_dispatch(base);
+}
+
+
+int
+rpcclnt_call (rpcclnt *clnt, const char *method, ProtobufCBinaryData *msg,
+              rpcclnt_cbk cbk)
+{
+        Pbcodec__PbRpcRequest reqhdr = PBCODEC__PB_RPC_REQUEST__INIT;
+        int       ret = -1;
+        size_t    rlen = 0;
+        char     *rbuf = NULL;
+        char     *mth  = NULL;
+
+        mth = strdup (method);
+        if (!mth)
+                return -1;
+
+        reqhdr.id = 1;
+        reqhdr.has_params = 1;
+        reqhdr.params.data = msg->data ;
+        reqhdr.params.len = msg->len;
+        reqhdr.method = mth;
+
+        struct saved_req *entry = calloc (1, sizeof (*entry));
+        if (!entry) {
+                return -1;
+        }
+
+        list_add_tail (&entry->list, &clnt->outstanding);
+        entry->id = reqhdr.id;
+        entry->cbk = cbk;
+
+        rlen = rpc_write_request (clnt, &reqhdr, &rbuf);
+
+        free (mth);
+        free (rbuf);
+        return 0;
 }

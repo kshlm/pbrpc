@@ -20,7 +20,10 @@ set(TESTPROTOSRC ${CMAKE_SOURCE_DIR}/calc.pb-c.c ${CMAKE_SOURCE_DIR}/calc.pb-c.h
   #COMMAND protoc-c --proto_path=${CMAKE_SOURCE_DIR} --c_out=${CMAKE_SOURCE_DIR} ${TESTPROTO}
   #)
 
-set(MINIRPCSRC ${MINIPROTOSRC} ${TESTPROTOSRC} ${CMAKE_SOURCE_DIR}/rpc.c ${CMAKE_SOURCE_DIR}/rpc.h)
+  set(MINIRPCSRC ${MINIPROTOSRC} ${TESTPROTOSRC} ${CMAKE_SOURCE_DIR}/rpc.c
+         ${CMAKE_SOURCE_DIR}/rpc.h
+         ${CMAKE_SOURCE_DIR}/rpcclnt.h
+         ${CMAKE_SOURCE_DIR}/list.h)
 add_library(pbminirpc SHARED ${MINIRPCSRC})
 target_link_libraries(pbminirpc ${PROTOC_LIBRARIES} ${LIBEVENT_LIBRARIES})
 
@@ -30,4 +33,4 @@ set(CLIENTSRC ${CMAKE_SOURCE_DIR}/client.c)
 add_executable(server ${SERVERSRC})
 target_link_libraries(server pbminirpc)
 add_executable(client ${CLIENTSRC})
-target_link_libraries(client pbminirpc)
+target_link_libraries(client pbminirpc pthread)

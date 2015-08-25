@@ -5,9 +5,16 @@
 #include <event2/event.h>
 
 #include "pbrpc.pb-c.h"
+#include "rpcclnt.h"
 
+/**
+ * Rpcsvc method type
+ */
 typedef int (*rpcsvc_fn) (ProtobufCBinaryData *req,
                           ProtobufCBinaryData *rsp);
+/**
+ * Rpcsvc method entry
+ */
 struct rpcsvc_fn_obj {
         rpcsvc_fn fn;
         char *name;
@@ -27,14 +34,6 @@ struct rpcsvc {
 };
 
 typedef struct rpcsvc rpcsvc;
-
-struct rpcclnt {
-        struct bufferevent *bev;
-        void *ctx;
-};
-
-typedef struct rpcclnt rpcclnt;
-
 
 
 /**
@@ -95,14 +94,8 @@ enum method_type {
 typedef int (*rpc_handler_func) (ProtobufCBinaryData *req,
                                  ProtobufCBinaryData *reply);
 
-Pbcodec__PbRpcResponse *
-rpc_read_rsp (const char* msg, size_t msg_len);
-
 Pbcodec__PbRpcRequest *
 rpc_read_req (rpcsvc *svc, const char* msg, size_t msg_len);
-
-int
-rpc_write_request (Pbcodec__PbRpcRequest *reqhdr, char **buf);
 
 int
 rpc_write_reply (rpcsvc *svc, Pbcodec__PbRpcResponse *rsphdr, char **buf);

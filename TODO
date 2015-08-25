@@ -1,0 +1,5 @@
+- Rename exported symbols to use pbrpc_svc and pbrpc_clnt instead of rpcsvc and rpcclnt respectively.
+- Finish API documentation
+- Add multiple RPC calls in client.c
+- Make rpcclnt_mainloop pthread_create friendly
+- Make rpcclnt_destroy 'thread-safe'

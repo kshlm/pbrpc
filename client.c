@@ -1,11 +1,13 @@
 #include "calc.pb-c.h"
 #include "pbrpc.pb-c.h"
 #include "rpc.h"
+#include "rpcclnt.h"
+
 #include <inttypes.h>
 #include <event2/event.h>
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
-
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -13,70 +15,66 @@
 
 
 #define DBUG(x) fprintf (stdout, "%s was called\n", # x)
-static void
-event_cb (struct bufferevent *bev, short events, void *ctx)
+
+static void*
+mainloop (void *arg)
 {
-        if (events & BEV_EVENT_CONNECTED) {
-                Calc__CalcReq calc = CALC__CALC_REQ__INIT;
-                calc.op = 1; calc.a = 2; calc.b = 3;
-                size_t clen = calc__calc_req__get_packed_size(&calc);
-                char *cbuf = calloc (1, clen);
-                calc__calc_req__pack(&calc, cbuf);
+        rpcclnt *clnt = arg;
 
-                Pbcodec__PbRpcRequest reqhdr = PBCODEC__PB_RPC_REQUEST__INIT;
-                reqhdr.id = 1;
-                reqhdr.method = "calculate";
-                reqhdr.has_params = 1;
-                reqhdr.params.data = cbuf;
-                reqhdr.params.len = clen;
+        rpcclnt_mainloop (clnt);
 
-                char *rbuf = NULL;
-                size_t rlen = rpc_write_request (&reqhdr, &rbuf);
-                bufferevent_write(bev, rbuf, rlen);
-        }
+        return NULL;
 }
 
-static void
-write_cb (struct bufferevent *bev, void *ctx)
-{
-}
 
-static void
-read_cb (struct bufferevent *bev, void *ctx)
+int
+calc_cbk (rpcclnt *clnt, ProtobufCBinaryData *msg, int ret)
 {
-        char buf[128] = {0};
-        size_t read = bufferevent_read(bev, buf, sizeof(buf));
-        Pbcodec__PbRpcResponse *rsp = rpc_read_rsp (buf, read);
-        Calc__CalcRsp *crsp = calc__calc_rsp__unpack (NULL, rsp->result.len, rsp->result.data);
+        if (ret)
+                return ret;
 
-        printf("rsp->id = %d, rsp->sum = %d\n", rsp->id, crsp->ret);
+        Calc__CalcRsp *crsp = calc__calc_rsp__unpack (NULL, msg->len,
+                                                      msg->data);
+
+        printf("rsp->sum = %d\n", crsp->ret);
         calc__calc_rsp__free_unpacked (crsp, NULL);
 }
 
 int main(int argc, char **argv)
 {
-        struct event_base *base;
         int ret;
-        base = event_base_new ();
-        if (!base) {
-                fprintf(stderr, "failed to create event base\n");
+        rpcclnt *clnt = NULL;
+
+        clnt = rpcclnt_new ("localhost", 9876);
+        if (!clnt) {
+                fprintf (stderr, "Failed to create an rpcclnt object\n");
                 return 1;
         }
-        struct bufferevent *bev = bufferevent_socket_new (base, -1,
-                                                          BEV_OPT_CLOSE_ON_FREE);
-        if (!bev) {
-                fprintf(stderr, "failed to create bufferevent\n");
-                return 1;
-        }
-        ret = bufferevent_socket_connect_hostname (bev, NULL, AF_INET,
-                                                   "localhost", 9876);
+
+        pthread_t tid;
+        ret = pthread_create (&tid, NULL, mainloop, clnt);
         if (ret) {
-                perror("connect failed");
-                return 1;
+                rpcclnt_destroy (clnt);
+                return ret;
         }
-        bufferevent_setcb (bev, read_cb, write_cb, event_cb, NULL);
-        bufferevent_enable (bev, EV_READ|EV_WRITE);
-        event_base_dispatch(base);
+
+        Calc__CalcReq calc = CALC__CALC_REQ__INIT;
+        calc.op = 1; calc.a = 2; calc.b = 3;
+        size_t clen = calc__calc_req__get_packed_size(&calc);
+        char *cbuf = calloc (1, clen);
+        calc__calc_req__pack(&calc, cbuf);
+
+        ProtobufCBinaryData msg;
+        msg.len = clen;
+        msg.data = cbuf;
+
+        ret = rpcclnt_call (clnt, "calculate", &msg, calc_cbk);
+        if (ret) {
+                fprintf (stderr, "RPC call failed\n");
+        }
+
+        pthread_join (tid, NULL);
+        return 0;
 }
 
 
