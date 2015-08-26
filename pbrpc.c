@@ -9,9 +9,27 @@
 #include <event2/listener.h>
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
+#include <pthread.h>
 
 #include "pbrpc.h"
 #include "pbrpc.pb-c.h"
+
+static uint64_t
+next_id (void)
+{
+        static uint64_t id_gen = 0;
+        static pthread_mutex_t id_lock = PTHREAD_MUTEX_INITIALIZER;
+
+        uint64_t id = 0;
+
+        pthread_mutex_lock (&id_lock);
+        {
+                id = ++id_gen;
+        }
+        pthread_mutex_unlock (&id_lock);
+
+        return id;
+}
 
 
 static void
@@ -523,7 +541,7 @@ pbrpc_clnt_call (pbrpc_clnt *clnt, const char *method,
         if (!mth)
                 return -1;
 
-        reqhdr.id = 1;
+        reqhdr.id = next_id();
         reqhdr.has_params = 1;
         reqhdr.params.data = msg->data ;
         reqhdr.params.len = msg->len;
