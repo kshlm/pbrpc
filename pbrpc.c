@@ -14,6 +14,24 @@
 #include "pbrpc.h"
 #include "pbrpc.pb-c.h"
 
+#define DECL_CALLCOUNT(x) static int x = 0
+#define UP_CALLCOUNT(x) (x)++
+#define PRINT_CALLCOUNT(dom, x) fprintf (stdout, "%s: call no. %d\n", (dom), (x));
+
+#define LOGFILE "/tmp/eventlog"
+
+static void
+my_event_debug (struct bufferevent *bev, FILE *fp)
+{
+        if (!bev)
+                return;
+
+        fprintf (fp, "start of dump\n");
+        event_base_dump_events (bufferevent_get_base(bev), fp);
+        fprintf (fp, "end of dump\n");
+}
+
+
 static uint64_t
 next_id (void)
 {
@@ -35,12 +53,16 @@ next_id (void)
 static void
 svc_read_cb(struct bufferevent *bev, void *ctx)
 {
+        FILE *fp = fopen ("/tmp/eventlog", "a+");
+        DECL_CALLCOUNT(read_cb);
         pbrpc_svc          *svc  = ctx;
         char            *buf  = NULL;
         struct evbuffer *in   = NULL;
         size_t           len  = 0;
         size_t           read = 0;
 
+        UP_CALLCOUNT(read_cb);
+        PRINT_CALLCOUNT("svc", read_cb);
         in = bufferevent_get_input (bev);
         len = evbuffer_get_length (in);
         buf = calloc (1, len);
@@ -71,6 +93,8 @@ svc_read_cb(struct bufferevent *bev, void *ctx)
                 bufferevent_write (bev, outbuf, ret);
                 free(outbuf);
         }
+        my_event_debug (bev, fp);
+        fclose (fp);
         free (buf);
 }
 
@@ -91,12 +115,18 @@ filter_pbrpc_messages (struct evbuffer *src,
                 struct evbuffer *dst, ev_ssize_t dst_limit,
                 enum bufferevent_flush_mode mode, void *ctx)
 {
+        FILE *fp = fopen ("/tmp/eventlog", "a+");
+        DECL_CALLCOUNT(filter);
         uint64_t message_len = 0;
         size_t buf_len = 0;
         size_t expected_len = 0;
         size_t tmp = 0;
         unsigned char *lenbuf = NULL;
+        struct bufferevent *bev = ctx;
 
+        UP_CALLCOUNT(filter);
+        PRINT_CALLCOUNT("filter", filter);
+        fprintf(stdout, "filter: flush mode = %d\n", mode);
         /**
          * Read the message len evbuffer_pullup doesn't drain the buffer. It
          * just makes sure that given number of bytes are contiguous, which
@@ -121,6 +151,8 @@ filter_pbrpc_messages (struct evbuffer *src,
         if (tmp != expected_len)
                 return BEV_ERROR;
 
+        my_event_debug (bev, fp);
+        fclose (fp);
         return BEV_OK;
 }
 
@@ -139,7 +171,7 @@ accept_conn_cb(struct evconnlistener *listener,
 
         struct bufferevent *filtered_bev = bufferevent_filter_new (
                         bev, filter_pbrpc_messages, NULL, BEV_OPT_CLOSE_ON_FREE,
-                        NULL, NULL);
+                        NULL, bev);
 
         bufferevent_setcb(filtered_bev, svc->reader, NULL, svc->notifier, svc);
         bufferevent_enable(filtered_bev, EV_READ|EV_WRITE);
