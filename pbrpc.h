@@ -5,7 +5,6 @@
 #include <event2/event.h>
 
 #include "pbrpc.pb-c.h"
-#include "pbrpc-clnt.h"
 
 /**
  * Rpcsvc method type
@@ -22,12 +21,18 @@ struct pbrpc_svc_fn_obj {
 
 typedef struct pbrpc_svc_fn_obj pbrpc_svc_fn_obj;
 
+typedef int (*msg_processor) (void *handle, struct bufferevent *bev, char *buf);
+struct cb_closure {
+        msg_processor fn;
+};
+
 struct pbrpc_svc {
         struct evconnlistener *listener;
         void *ctx;
         /**
          * Callbacks for accepted connection
          * */
+        struct cb_closure closure;
         bufferevent_data_cb reader;
         bufferevent_event_cb notifier;
         pbrpc_svc_fn_obj *methods;

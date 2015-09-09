@@ -7,11 +7,13 @@
 
 #include "list.h"
 #include "pbrpc.pb-c.h"
+#include "pbrpc.h"
 
 
 struct pbrpc_clnt {
         struct bufferevent *bev;
         struct list_head outstanding;
+        struct cb_closure closure;
         void *ctx;
 };
 

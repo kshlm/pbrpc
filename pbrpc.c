@@ -12,6 +12,7 @@
 #include <pthread.h>
 
 #include "pbrpc.h"
+#include "pbrpc-clnt.h"
 #include "pbrpc.pb-c.h"
 
 #define DECL_CALLCOUNT(x) static int x = 0
@@ -44,65 +45,8 @@ next_id (void)
 }
 
 
-static void
-svc_read_cb(struct bufferevent *bev, void *ctx)
-{
-        DECL_CALLCOUNT(read_cb);
-        pbrpc_svc          *svc  = ctx;
-        char            *buf  = NULL;
-        struct evbuffer *in   = NULL;
-        size_t           len  = 0;
-        size_t           read = 0;
-        char            *tofree = NULL;
-
-        UP_CALLCOUNT(read_cb);
-        PRINT_CALLCOUNT("svc", read_cb);
-        in = bufferevent_get_input (bev);
-        len = evbuffer_get_length (in);
-        tofree = buf = calloc (1, len);
-        if (!buf) {
-                fprintf (stderr, "Failed to allocate memory\n");
-                return;
-        }
-        read = bufferevent_read (bev, buf, len);
-        if (read < 0) {
-                perror("bufferevent_read failed");
-
-        } else {
-                do {
-                        DECL_CALLCOUNT (msgcount);
-                        int ret;
-                        uint64_t bytes_read = 0;
-
-                        Pbcodec__PbRpcRequest *reqhdr = rpc_read_req (svc, buf, &bytes_read);
-                        Pbcodec__PbRpcResponse rsphdr = PBCODEC__PB_RPC_RESPONSE__INIT;
-                        ret = rpc_invoke_call (svc, reqhdr, &rsphdr);
-                        if (ret) {
-                                fprintf(stderr, "ret = %d: rpc_invoke_call failed\n", ret);
-                        }
-                        char *outbuf = NULL;
-                        ret = rpc_write_reply (svc, &rsphdr, &outbuf);
-                        if (ret <= 0) {
-                                fprintf(stderr, "ret = %d: rpc_write_reply failed\n", ret);
-                        }
-
-                        pbcodec__pb_rpc_request__free_unpacked (reqhdr, NULL);
-                        bufferevent_write (bev, outbuf, ret);
-                        free(outbuf);
-
-                        read -= bytes_read;
-                        buf += bytes_read;
-                        UP_CALLCOUNT(msgcount);
-                        PRINT_CALLCOUNT("msg-proc", msgcount);
-
-                } while (read > 0);
-        }
-        free (tofree);
-}
-
-
-static void
-svc_event_cb(struct bufferevent *bev, short events, void *ctx)
+void
+generic_event_cb (struct bufferevent *bev, short events, void *ctx)
 {
         if (events & BEV_EVENT_ERROR)
                 perror("Error from bufferevent");
@@ -112,12 +56,122 @@ svc_event_cb(struct bufferevent *bev, short events, void *ctx)
 }
 
 
+static void
+generic_read_cb (struct bufferevent *bev, void *ctx)
+{
+        struct cb_closure       *cls = ctx;
+        char                    *buf  = NULL;
+        char                    *msg = NULL;
+        struct evbuffer         *in   = NULL;
+        size_t                  len  = 0;
+        size_t                  read = 0;
+
+        in = bufferevent_get_input (bev);
+        len = evbuffer_get_length (in);
+
+        buf = calloc (1, len);
+        if (!buf) {
+                fprintf (stderr, "Failed to allocate memory\n");
+                return;
+        }
+
+        read = bufferevent_read (bev, buf, len);
+        if (read < 0) {
+                perror("bufferevent_read failed");
+                goto out;
+        }
+
+        uint64_t bytes_read = 0;
+        for (msg = buf; read > 0; read -= bytes_read, msg += bytes_read)
+                bytes_read = cls->fn (cls, bev, msg);
+
+out:
+        free (buf);
+
+}
+
+
+static int
+process_response (void *handle, struct bufferevent *bev, char *msg)
+{
+        struct cb_closure *cls = handle;
+        pbrpc_clnt *clnt = NULL;
+        uint64_t bytes_read = 0;
+        Pbcodec__PbRpcResponse *rsp = NULL;
+
+        clnt = list_entry (cls, pbrpc_clnt, closure);
+
+        rsp = rpc_read_rsp (msg, &bytes_read);
+        if (!rsp) {
+                fprintf (stderr, "Failed to parse response "
+                         "from server\n");
+                return bytes_read;
+        }
+
+        struct saved_req *call, *tmp;
+        char found = 0;
+
+        list_for_each_entry_safe (call, tmp, &clnt->outstanding, list) {
+                if (call->id == rsp->id) {
+                        list_del_init (&call->list);
+                        found = 1;
+                        break;
+                }
+
+        }
+        if (!found) {
+                fprintf (stderr, "Failed to find the corresponding "
+                         "pending call request\n");
+                goto out;
+        }
+
+        call->cbk (clnt, &rsp->result, 0);
+        free (call);
+
+out:
+        pbcodec__pb_rpc_response__free_unpacked (rsp, NULL);
+        return bytes_read;
+}
+
+
+static int
+process_request (void *handle, struct bufferevent *bev, char *msg)
+{
+        uint64_t bytes_read = 0;
+        struct cb_closure *cls = handle;
+        pbrpc_svc *svc = NULL;
+        int ret = -1;
+        char *outbuf = NULL;
+
+        svc = list_entry(cls, pbrpc_svc, closure);
+
+        Pbcodec__PbRpcRequest *reqhdr = rpc_read_req (svc, msg, &bytes_read);
+        Pbcodec__PbRpcResponse rsphdr = PBCODEC__PB_RPC_RESPONSE__INIT;
+        ret = rpc_invoke_call (svc, reqhdr, &rsphdr);
+        if (ret) {
+                fprintf(stderr, "ret = %d: rpc_invoke_call failed\n", ret);
+        }
+
+        outbuf = NULL;
+        ret = rpc_write_reply (svc, &rsphdr, &outbuf);
+        if (ret <= 0) {
+                fprintf(stderr, "ret = %d: rpc_write_reply failed\n", ret);
+        }
+
+        bufferevent_write (bev, outbuf, ret);
+
+        pbcodec__pb_rpc_request__free_unpacked (reqhdr, NULL);
+        free(outbuf);
+
+        return bytes_read;
+}
+
+
 static enum bufferevent_filter_result
 filter_pbrpc_messages (struct evbuffer *src,
                 struct evbuffer *dst, ev_ssize_t dst_limit,
                 enum bufferevent_flush_mode mode, void *ctx)
 {
-        DECL_CALLCOUNT(filter);
         uint64_t message_len = 0;
         size_t buf_len = 0;
         size_t expected_len = 0;
@@ -125,15 +179,13 @@ filter_pbrpc_messages (struct evbuffer *src,
         unsigned char *lenbuf = NULL;
         struct bufferevent *bev = ctx;
 
-        UP_CALLCOUNT(filter);
-        PRINT_CALLCOUNT("filter", filter);
-        fprintf(stdout, "filter: flush mode = %d\n", mode);
         /**
          * Read the message len evbuffer_pullup doesn't drain the buffer. It
          * just makes sure that given number of bytes are contiguous, which
          * allows us to easily copy out stuff.
          */
-        lenbuf = evbuffer_pullup (src, sizeof(message_len)); if (!lenbuf)
+        lenbuf = evbuffer_pullup (src, sizeof(message_len));
+        if (!lenbuf)
                 return BEV_ERROR;
 
         memcpy (&message_len, lenbuf, sizeof(message_len));
@@ -143,12 +195,11 @@ filter_pbrpc_messages (struct evbuffer *src,
         expected_len = sizeof (message_len) + message_len;
 
         buf_len = evbuffer_get_length (src);
-
         if (buf_len < expected_len)
                 return BEV_NEED_MORE;
 
         tmp = evbuffer_remove_buffer
-                (src, dst, (sizeof(message_len) + message_len));
+                (src, dst, expected_len);
         if (tmp != expected_len)
                 return BEV_ERROR;
 
@@ -172,7 +223,8 @@ accept_conn_cb(struct evconnlistener *listener,
                         bev, filter_pbrpc_messages, NULL, BEV_OPT_CLOSE_ON_FREE,
                         NULL, bev);
 
-        bufferevent_setcb(filtered_bev, svc->reader, NULL, svc->notifier, svc);
+        bufferevent_setcb(filtered_bev, generic_read_cb, NULL, generic_event_cb,
+                          &svc->closure);
         bufferevent_enable(filtered_bev, EV_READ|EV_WRITE);
 }
 
@@ -205,16 +257,6 @@ pbrpc_svc_destroy (pbrpc_svc *svc)
         event_base_free (base);
         free (svc);
         return 0;
-}
-
-
-static void
-pbrpc_svc_init (pbrpc_svc *svc, struct evconnlistener *listener,
-             bufferevent_data_cb reader, bufferevent_event_cb notifier)
-{
-        svc->listener = listener;
-        svc->reader   = reader;
-        svc->notifier = notifier;
 }
 
 
@@ -252,8 +294,8 @@ pbrpc_svc_new (const char *name, int16_t port)
                 goto err;
         }
         evconnlistener_set_error_cb(listener, accept_error_cb);
-
-        pbrpc_svc_init (new, listener, svc_read_cb, svc_event_cb);
+        new->listener = listener;
+        new->closure.fn = process_request;
 
         return new;
 err:
@@ -409,82 +451,6 @@ rpc_read_req (pbrpc_svc *svc, const char* msg, uint64_t *bytes_read)
 }
 
 
-void
-clnt_read_cb (struct bufferevent *bev, void *ctx)
-{
-        pbrpc_clnt         *clnt = ctx;
-        char            *buf  = NULL;
-        struct evbuffer *in   = NULL;
-        size_t           len  = 0;
-        size_t           read = 0;
-        Pbcodec__PbRpcResponse *rsp = NULL;
-        char            *tofree = NULL;
-
-        in = bufferevent_get_input (bev);
-        len = evbuffer_get_length (in);
-        tofree = buf = calloc (1, len);
-        if (!buf) {
-                fprintf (stderr, "Failed to allocate memory\n");
-                return;
-        }
-        read = bufferevent_read (bev, buf, len);
-        if (read < 0) {
-                perror("bufferevent_read failed");
-                goto out;
-
-        }
-        int ret;
-        do {
-                uint64_t bytes_read = 0;
-                rsp = rpc_read_rsp (buf, &bytes_read);
-                if (!rsp) {
-                        fprintf (stderr, "Failed to parse response "
-                                 "from server\n");
-                        return;
-                }
-
-                struct saved_req *call, *tmp;
-                char found = 0;
-
-                list_for_each_entry_safe (call, tmp, &clnt->outstanding, list) {
-                        if (call->id == rsp->id) {
-                                list_del_init (&call->list);
-                                found = 1;
-                                break;
-                        }
-
-                }
-                if (!found) {
-                        fprintf (stderr, "Failed to find the corresponding "
-                                 "pending call request\n");
-                        goto out;
-                }
-
-                call->cbk (clnt, &rsp->result, 0);
-                free (call);
-
-                read -= bytes_read;
-                buf += bytes_read;
-
-        } while (read > 0);
-
-out:
-        pbcodec__pb_rpc_response__free_unpacked (rsp, NULL);
-        free (tofree);
-}
-
-
-void
-clnt_event_cb (struct bufferevent *bev, short events, void *ctx)
-{
-        if (events & BEV_EVENT_ERROR)
-                perror("Error from bufferevent");
-        if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
-                bufferevent_free(bev);
-        }
-}
-
-
 int
 pbrpc_clnt_destroy (pbrpc_clnt *clnt)
 {
@@ -539,11 +505,13 @@ pbrpc_clnt_new (const char *host, int16_t port)
                         bev, filter_pbrpc_messages, NULL, BEV_OPT_CLOSE_ON_FREE,
                         NULL, NULL);
 
-        bufferevent_setcb (filtered_bev, clnt_read_cb, NULL, clnt_event_cb, clnt);
+        bufferevent_setcb (filtered_bev, generic_read_cb, NULL,
+                           generic_event_cb, &clnt->closure);
         bufferevent_enable (filtered_bev, EV_READ|EV_WRITE);
 
         INIT_LIST_HEAD (&clnt->outstanding);
         clnt->bev = filtered_bev;
+        clnt->closure.fn = process_response;
         return clnt;
 err:
         if (bev)
