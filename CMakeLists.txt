@@ -15,6 +15,7 @@ set(MINIPROTOSRC ${CMAKE_SOURCE_DIR}/pbrpc.pb-c.c ${CMAKE_SOURCE_DIR}/pbrpc.pb-c
 
 
   set(MINIRPCSRC ${MINIPROTOSRC} ${TESTPROTOSRC} ${CMAKE_SOURCE_DIR}/pbrpc.c
+         ${CMAKE_SOURCE_DIR}/pbrpc-clnt.c
          ${CMAKE_SOURCE_DIR}/pbrpc.h
          ${CMAKE_SOURCE_DIR}/pbrpc-clnt.h
          ${CMAKE_SOURCE_DIR}/list.h)

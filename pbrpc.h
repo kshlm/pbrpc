@@ -107,4 +107,13 @@ int
 rpc_invoke_call (pbrpc_svc *svc, Pbcodec__PbRpcRequest *reqhdr,
                  Pbcodec__PbRpcResponse *rsphdr);
 
+enum bufferevent_filter_result
+filter_pbrpc_messages (struct evbuffer *src,
+                struct evbuffer *dst, ev_ssize_t dst_limit,
+                enum bufferevent_flush_mode mode, void *ctx);
+void
+generic_event_cb (struct bufferevent *bev, short events, void *ctx);
+
+void
+generic_read_cb (struct bufferevent *bev, void *ctx);
 #endif
