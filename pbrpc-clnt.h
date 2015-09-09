@@ -93,9 +93,6 @@ pbrpc_clnt_call (pbrpc_clnt *clnt, const char *method, ProtobufCBinaryData *msg,
               pbrpc_clnt_cbk cbk);
 
 
-Pbcodec__PbRpcResponse *
-rpc_read_rsp (const char* msg, size_t msg_len);
-
 
 int
 rpc_write_request (pbrpc_clnt *clnt, Pbcodec__PbRpcRequest *reqhdr, char **buf);

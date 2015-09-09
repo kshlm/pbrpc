@@ -94,8 +94,6 @@ enum method_type {
 typedef int (*rpc_handler_func) (ProtobufCBinaryData *req,
                                  ProtobufCBinaryData *reply);
 
-Pbcodec__PbRpcRequest *
-rpc_read_req (pbrpc_svc *svc, const char* msg, size_t msg_len);
 
 int
 rpc_write_reply (pbrpc_svc *svc, Pbcodec__PbRpcResponse *rsphdr, char **buf);
