@@ -1,5 +1,4 @@
 #include "calc.pb-c.h"
-#include "../pbrpc.h"
 #include "../pbrpc-clnt.h"
 
 #include <inttypes.h>
@@ -39,6 +38,22 @@ calc_cbk (pbrpc_clnt *clnt, ProtobufCBinaryData *msg, int ret)
         calc__calc_rsp__free_unpacked (crsp, NULL);
 }
 
+static ProtobufCBinaryData
+build_call_args (Calc__CalcReq *calc, int op, int a, int b)
+{
+        size_t clen;
+        char *cbuf;
+        ProtobufCBinaryData ret;
+
+        calc->op = 1; calc->a = 2; calc->b = 3;
+        clen = calc__calc_req__get_packed_size(calc);
+        cbuf = calloc (1, clen);
+        calc__calc_req__pack(calc, cbuf);
+        ret.data = cbuf; ret.len = clen;
+        return ret;
+}
+
+
 int main(int argc, char **argv)
 {
         int ret;
@@ -50,29 +65,20 @@ int main(int argc, char **argv)
                 return 1;
         }
 
-        pthread_t tid;
-        ret = pthread_create (&tid, NULL, mainloop, clnt);
-        if (ret) {
-                pbrpc_clnt_destroy (clnt);
-                return ret;
-        }
-
         Calc__CalcReq calc = CALC__CALC_REQ__INIT;
-        calc.op = 1; calc.a = 2; calc.b = 3;
-        size_t clen = calc__calc_req__get_packed_size(&calc);
-        char *cbuf = calloc (1, clen);
-        calc__calc_req__pack(&calc, cbuf);
+        int i = 1;
+        do {
+                fprintf (stdout, "call no %d\n", i);
+                ProtobufCBinaryData msg  = build_call_args (&calc, 1, i, i+1);
+                ret = pbrpc_clnt_call (clnt, "calculate", &msg, calc_cbk);
+                if (ret) {
+                        fprintf (stderr, "RPC call failed\n");
+                }
+                i++;
 
-        ProtobufCBinaryData msg;
-        msg.len = clen;
-        msg.data = cbuf;
+        } while (i <= 10);
+        event_base_dispatch (bufferevent_get_base (clnt->bev));
 
-        ret = pbrpc_clnt_call (clnt, "calculate", &msg, calc_cbk);
-        if (ret) {
-                fprintf (stderr, "RPC call failed\n");
-        }
-
-        pthread_join (tid, NULL);
         return 0;
 }
 
