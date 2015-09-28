@@ -70,7 +70,7 @@ int main(int argc, char **argv)
         do {
                 fprintf (stdout, "call no %d\n", i);
                 ProtobufCBinaryData msg  = build_call_args (&calc, 1, i, i+1);
-                ret = pbrpc_clnt_call (clnt, "calculate", &msg, calc_cbk);
+        ret = pbrpc_clnt_call (clnt, "Calculator.Calculate", &msg, calc_cbk);
                 if (ret) {
                         fprintf (stderr, "RPC call failed\n");
                 }

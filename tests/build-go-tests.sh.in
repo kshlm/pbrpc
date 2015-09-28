@@ -1,0 +1,32 @@
+#!/bin/bash
+
+PBRPC_SRC=@CMAKE_SOURCE_DIR@
+TESTS_BINDIR=@CMAKE_CURRENT_BINARY_DIR@
+
+TMP_BUILDDIR=$(mktemp -d)
+GO_BUILDDIR=${TMP_BUILDDIR}/go
+
+function setup_env() {
+  mkdir -p ${GO_BUILDDIR}
+}
+
+function build_go_tests () {
+  export GOPATH=${GO_BUILDDIR}
+
+  mkdir -p ${GOPATH}/src/github.com/kshlm
+  cp -a ${PBRPC_SRC} ${GOPATH}/src/github.com/kshlm
+
+  rm -rf ${GOPATH}/src/github.com/kshlm/pbrpc/.git
+  go get github.com/kshlm/pbrpc/pbcodec
+
+  cd ${GOPATH}/src/github.com/kshlm/pbrpc/tests
+  go build -o $TESTS_BINDIR/go-server server.go
+  go build -o $TESTS_BINDIR/go-client client.go
+}
+
+function main () {
+  setup_env
+  build_go_tests
+}
+
+main
