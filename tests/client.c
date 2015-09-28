@@ -67,7 +67,7 @@ int main(int argc, char **argv)
         msg.len = clen;
         msg.data = cbuf;
 
-        ret = pbrpc_clnt_call (clnt, "calculate", &msg, calc_cbk);
+        ret = pbrpc_clnt_call (clnt, "Calculator.Calculate", &msg, calc_cbk);
         if (ret) {
                 fprintf (stderr, "RPC call failed\n");
         }

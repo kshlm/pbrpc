@@ -3,7 +3,6 @@ package pbcodec
 import (
 	"errors"
 	"io"
-	"log"
 	"net/rpc"
 	"sync"
 
@@ -53,7 +52,6 @@ func (c *serverCodec) ReadRequestBody(params interface{}) error {
 }
 
 func (c *serverCodec) WriteResponse(r *rpc.Response, result interface{}) error {
-	log.Print("in write repsonse")
 	rsp := &PbRpcResponse{Id: &r.Seq}
 
 	if r.Error != "" {

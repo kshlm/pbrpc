@@ -50,7 +50,7 @@ main(int argc, char **argv)
         struct evconnlistener *listener;
         struct sockaddr_in sin;
         pbrpc_svc_fn_obj tbl[] = {
-                {calculate, "calculate"},
+                {calculate, "Calculator.Calculate"},
                 NULL
         };
 
