@@ -7,11 +7,13 @@
 
 #include "list.h"
 #include "pbrpc.pb-c.h"
+#include "pbrpc.h"
 
 
 struct pbrpc_clnt {
         struct bufferevent *bev;
         struct list_head outstanding;
+        struct cb_closure closure;
         void *ctx;
 };
 
@@ -92,9 +94,6 @@ int
 pbrpc_clnt_call (pbrpc_clnt *clnt, const char *method, ProtobufCBinaryData *msg,
               pbrpc_clnt_cbk cbk);
 
-
-Pbcodec__PbRpcResponse *
-rpc_read_rsp (const char* msg, size_t msg_len);
 
 
 int

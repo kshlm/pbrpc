@@ -5,7 +5,6 @@
 #include <event2/event.h>
 
 #include "pbrpc.pb-c.h"
-#include "pbrpc-clnt.h"
 
 /**
  * Rpcsvc method type
@@ -22,12 +21,18 @@ struct pbrpc_svc_fn_obj {
 
 typedef struct pbrpc_svc_fn_obj pbrpc_svc_fn_obj;
 
+typedef int (*msg_processor) (void *handle, struct bufferevent *bev, char *buf);
+struct cb_closure {
+        msg_processor fn;
+};
+
 struct pbrpc_svc {
         struct evconnlistener *listener;
         void *ctx;
         /**
          * Callbacks for accepted connection
          * */
+        struct cb_closure closure;
         bufferevent_data_cb reader;
         bufferevent_event_cb notifier;
         pbrpc_svc_fn_obj *methods;
@@ -94,8 +99,6 @@ enum method_type {
 typedef int (*rpc_handler_func) (ProtobufCBinaryData *req,
                                  ProtobufCBinaryData *reply);
 
-Pbcodec__PbRpcRequest *
-rpc_read_req (pbrpc_svc *svc, const char* msg, size_t msg_len);
 
 int
 rpc_write_reply (pbrpc_svc *svc, Pbcodec__PbRpcResponse *rsphdr, char **buf);
@@ -104,4 +107,13 @@ int
 rpc_invoke_call (pbrpc_svc *svc, Pbcodec__PbRpcRequest *reqhdr,
                  Pbcodec__PbRpcResponse *rsphdr);
 
+enum bufferevent_filter_result
+filter_pbrpc_messages (struct evbuffer *src,
+                struct evbuffer *dst, ev_ssize_t dst_limit,
+                enum bufferevent_flush_mode mode, void *ctx);
+void
+generic_event_cb (struct bufferevent *bev, short events, void *ctx);
+
+void
+generic_read_cb (struct bufferevent *bev, void *ctx);
 #endif
